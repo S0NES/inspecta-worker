@@ -1,0 +1,62 @@
+# Inspecta — inspecta-worker (processamento pesado: assignment, PDF, imagem, Pleno,
+# assinatura/Autentique, pagamento). Consome RabbitMQ; NÃO é exposto na internet.
+#
+# inspecta-core é resolvido via Maven a partir do Reposilite (repositório interno no
+# Dokploy) — o contexto de build é a própria pasta do inspecta-worker, sem precisar clonar
+# outros repos lado a lado.
+#
+#   cp .env.prod.example .env.prod && nano .env.prod
+#   docker compose --env-file .env.prod up -d --build
+#
+# Suba só DEPOIS do inspecta-api ter rodado o Flyway na primeira vez — o inspecta-worker
+# usa ddl-auto=validate e não sobe contra um schema que não existe.
+name: inspecta-worker
+
+services:
+  inspecta-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: registry.inspecta.viniciusscarabelli.tech/inspecta-worker:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    env_file:
+      - .env.prod
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      TZ: ${TZ:-America/Sao_Paulo}
+      JAVA_TOOL_OPTIONS: ${WORKER_JAVA_OPTS:--XX:MaxRAMPercentage=70}
+    deploy:
+      # arquitetura.md pede 2 réplicas (competing consumers nas filas), mas na VPS
+      # atual (compartilhada com Jenkins + Reposilite + registry + observabilidade)
+      # cada réplica de ~2g não cabe. Default = 1; suba p/ 2 via WORKER_REPLICAS
+      # quando a fila justificar e houver RAM. Consumidor concorrente: 1 réplica é
+      # seguro, só processa em série.
+      replicas: ${WORKER_REPLICAS:-1}
+      resources:
+        limits:
+          # Maior consumidor de heap é o pipeline de imagem (webp-imageio nativo)
+          # + OpenHTML2PDF. 2g cobre uma réplica com folga.
+          memory: ${WORKER_MEM_LIMIT:-2g}
+    # shm_size foi removido junto com o Chromium: /dev/shm grande era exigência do
+    # browser, o OpenHTML2PDF renderiza inteiramente no heap da JVM.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8081/actuator/health | grep -q UP || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
+    stop_grace_period: 40s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - dokploy-network
+    labels:
+      # Sem rota pública: só fala com banco e fila.
+      traefik.enable: "false"
+
+networks:
+  dokploy-network:
+    external: true

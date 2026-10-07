@@ -1,0 +1,36 @@
+# Profile prod: sem default de infra — env var faltando derruba o boot (fail-fast). RealHttpGateway
+# fica ativo (saida HTTP de verdade para Pleno/pagamento quando configurados). Autentique = inspecta-messenger.
+spring:
+  datasource:
+    url: ${DATABASE_URL}
+    username: ${DATABASE_USER}
+    password: ${DATABASE_PASSWORD}
+  rabbitmq:
+    host: ${RABBITMQ_HOST}
+    port: ${RABBITMQ_PORT}
+    username: ${RABBITMQ_USER}
+    password: ${RABBITMQ_PASSWORD}
+
+inspecta:
+  app-url: ${INSPECTA_APP_URL}
+  public:
+    base-url: ${PUBLIC_BASE_URL}
+  payment:
+    provider: ${PAYMENT_PROVIDER}
+    methods: ${PAYMENT_METHODS:PIX,CARD}
+    abacatepay:
+      api-key: ${ABACATEPAY_API_KEY}
+  pleno:
+    mode: ${PLENO_MODE}
+    importacao:
+      enabled: ${PLENO_IMPORTACAO_ENABLED:true}
+      poll-ms: ${PLENO_IMPORTACAO_POLL_MS:900000}
+    base-url: ${PLENO_BASE_URL}
+    client-id: ${PLENO_CLIENT_ID}
+    client-secret: ${PLENO_CLIENT_SECRET}
+  signature:
+    reminder:
+      enabled: ${SIGNATURE_REMINDER_ENABLED:true}
+      cron: ${SIGNATURE_REMINDER_CRON:0 0 8 * * *}
+      janela-dias: ${SIGNATURE_REMINDER_WINDOW_DAYS:7}
+      intervalo-horas: ${SIGNATURE_REMINDER_SPACING_HOURS:72}

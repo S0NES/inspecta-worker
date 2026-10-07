@@ -1,0 +1,116 @@
+server:
+  port: 8081
+  shutdown: graceful
+  forward-headers-strategy: framework   # Traefik = trusted proxy
+
+spring:
+  application:
+    name: inspecta-worker
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:test}
+  jpa:
+    hibernate:
+      ddl-auto: validate      # schema e do Flyway, executado SO pelo inspecta-api
+    open-in-view: false
+  flyway:
+    enabled: false
+  lifecycle:
+    timeout-per-shutdown-phase: 15s  # graceful shutdown timeout (RabbitMQ listeners, PDF render in-flight)
+  task:
+    scheduling:
+      pool:
+        size: 7                  # OutboxRelay + FilaAtribuicaoRetryCron + PlenoSyncCron + DlqMonitor (T7.10) + MetricsRollupCron + SignatureLembreteCron + PlenoImportacaoStatusCron
+  datasource:
+    hikari:
+      maximum-pool-size: 20     # 5 default listeners + 5 pleno consumers + 5 scheduler threads + 5 headroom (T7.9)
+      minimum-idle: 3
+      # PG do ambiente derruba conexão ociosa (idle_session_timeout). keepalive-time toca
+      # as conexões ociosas (reseta o timer do PG); max-lifetime aposenta antes do PG matar.
+      keepalive-time: 120000    # 2 min — < idle_session_timeout do PG
+      max-lifetime: 600000      # 10 min
+
+inspecta:
+  # URL base do SPA (inspecta-web). Usada pelo PaymentConsumer para montar as URLs de retorno/conclusão
+  # do checkout AbacatePay (/pagamento/retorno, /pagamento/concluido). Mesmo valor do inspecta-api.
+  app-url: ${INSPECTA_APP_URL:http://localhost:5173}
+  # URL publica do inspecta-api (Traefik/inspecta-web), usada so pra montar o link absoluto que o QR do
+  # laudo aponta (LaudoHtmlBuilder) -- o QR precisa de URL completa pra ser escaneavel por
+  # celular, uma /v1/public/... relativa nao serve. Mesmo dominio que serve /v1/public/**.
+  public:
+    base-url: ${PUBLIC_BASE_URL:http://localhost:8080}
+  outbox:
+    relay:
+      enabled: true          # jobs tambem publica via outbox (SKIP LOCKED = seguro em par com inspecta-api)
+  metrics:
+    rollup:
+      # Cron de rollup reprocessa D-1 ate D-N para capturar webhooks atrasados (MetricsRollupCron).
+      dias-retroativos: 7
+  payment:
+    # provider ativo: nome do bean PaymentGateway (fail-fast em prod, mock em test).
+    provider: ${PAYMENT_PROVIDER}
+    methods: ${PAYMENT_METHODS:PIX,CARD}
+    abacatepay:
+      api-key: ${ABACATEPAY_API_KEY}
+  pleno:
+    # Modo Pleno: "mock" = cliente mock (test); "http" = PlenoClientHttp (prod).
+    # fail-fast em prod (todas as variaveis obrigatorias se mode != mock).
+    mode: ${PLENO_MODE}
+    poll-ms: ${PLENO_POLL_MS:60000}
+    # "A volta" do ciclo Pleno (PLENO_INTEGRATION_PROMPT.md): poller de status da vistoria +
+    # download do PDF + laudo importado + assinatura. enabled=false = kill switch operacional
+    # (PlenoImportacaoStatusCron nao roda). O client de LEITURA e escolhido por inspecta.pleno.mode.
+    importacao:
+      enabled: ${PLENO_IMPORTACAO_ENABLED:true}
+      poll-ms: ${PLENO_IMPORTACAO_POLL_MS:900000}
+    base-url: ${PLENO_BASE_URL}
+    client-id: ${PLENO_CLIENT_ID}
+    client-secret: ${PLENO_CLIENT_SECRET}
+    token-ttl-seconds: ${PLENO_TOKEN_TTL_SECONDS:240}
+    # De-para Pleno: codigos/IDs que o PlenoWriteClientHttp usa ao espelhar. Os defaults
+    # sao os valores do InspectaSystem v1 — so mexer se a instancia Pleno do cliente usar outros IDs.
+    # OBRIGATORIO revisar por ambiente: tip-imo-codigo VARIA POR TENANT (Q6/Q9). Ainda "confirmar
+    # no tenant": tip-vis de conferencia, tip-imo de apartamento, gru-codigo, usu-codigo-modelo.
+    depara:
+      # tip-imo-codigo: default por tenant; tip-imo-por-tipo casa por substring de imoveis.tipo.
+      # Mapas de de-para: lista "chave:codigo" separada por virgula (parseada em Map no cliente).
+      tip-imo-codigo: ${PLENO_DEPARA_TIP_IMO_CODIGO:36}
+      tip-imo-por-tipo: ${PLENO_DEPARA_TIP_IMO_POR_TIPO:casa:14}
+      # tip-vis-codigo: default (entrada); tip-vis-por-nome casa por substring de tipos_servico.nome.
+      tip-vis-codigo: ${PLENO_DEPARA_TIP_VIS_CODIGO:2}
+      tip-vis-por-nome: ${PLENO_DEPARA_TIP_VIS_POR_NOME:entrada:2,saida:6}
+      gru-codigo-vistoriador: ${PLENO_DEPARA_GRU_CODIGO_VISTORIADOR:15}
+      usu-codigo-modelo: ${PLENO_DEPARA_USU_CODIGO_MODELO:}
+      cli-contestacao-dias: ${PLENO_DEPARA_CLI_CONTESTACAO_DIAS:5}
+      tip-fun-por-papel: ${PLENO_DEPARA_TIP_FUN_POR_PAPEL:locador:5,locatario:4,fiador:3,testemunha:6}
+      vistoriador-sistemas: ${PLENO_DEPARA_VISTORIADOR_SISTEMAS:6,3}
+  signature:
+    # O IO com a Autentique (createDocument, webhook, download do PDF) vive no inspecta-messenger.
+    # Aqui só o cron de lembrete de assinatura pendente (SignatureLembreteCron).
+    reminder:
+      enabled: ${SIGNATURE_REMINDER_ENABLED:true}
+      cron: ${SIGNATURE_REMINDER_CRON:0 0 8 * * *}
+      # Janela = validade do link da Autentique (7 dias). Fora dela, não lembra mais.
+      janela-dias: ${SIGNATURE_REMINDER_WINDOW_DAYS:7}
+      # Espaçamento mínimo entre lembretes pro mesmo signatário (72h ≈ dia 3 e 6; 24 = diário).
+      intervalo-horas: ${SIGNATURE_REMINDER_SPACING_HOURS:72}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  health:
+    livenessState:
+      enabled: true
+    readinessState:
+      enabled: true
+    # Readiness group: only database is genuinely blocking
+    # Exclude AMQP — inspecta-worker continues to serve queued messages even if broker is down
+    db:
+      enabled: true
+    rabbit:
+      enabled: false

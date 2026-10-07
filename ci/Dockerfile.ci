@@ -1,0 +1,12 @@
+# Build-runner do inspecta-worker: builda, testa (mvn verify) e, se passar, publica a
+# imagem e aciona o deploy real. docker.sock montado (docker-compose.ci.yml) para
+# os testes de integração (Testcontainers) e para docker build/push. App Dokploy à
+# parte — o app de produção "inspecta-worker" continua Source=Docker Image, inalterado.
+FROM maven:3.9-eclipse-temurin-21
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends docker.io curl \
+ && rm -rf /var/lib/apt/lists/*
+WORKDIR /ws
+COPY . .
+RUN chmod +x ci/entrypoint.sh
+ENTRYPOINT ["ci/entrypoint.sh"]

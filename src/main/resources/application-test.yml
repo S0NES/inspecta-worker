@@ -1,0 +1,33 @@
+# Profile test (default se SPRING_PROFILES_ACTIVE nao for setado): roda local/CI sem
+# nenhuma credencial real. MockHttpGateway garante que nenhuma chamada HTTP real
+# (Pleno, Autentique, pagamento) sai do processo.
+spring:
+  config:
+    import: optional:file:.env[.properties]
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/inspecta}
+    username: ${DATABASE_USER:inspecta}
+    password: ${DATABASE_PASSWORD:inspecta}
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER:inspecta}
+    password: ${RABBITMQ_PASSWORD:inspecta}
+
+inspecta:
+  payment:
+    provider: ${PAYMENT_PROVIDER:mock}
+    methods: ${PAYMENT_METHODS:PIX,CARD}
+    abacatepay:
+      api-key: ${ABACATEPAY_API_KEY:}
+  pleno:
+    mode: ${PLENO_MODE:mock}
+    base-url: ${PLENO_BASE_URL:}
+    client-id: ${PLENO_CLIENT_ID:}
+    client-secret: ${PLENO_CLIENT_SECRET:}
+  signature:
+    reminder:
+      enabled: ${SIGNATURE_REMINDER_ENABLED:true}
+      cron: ${SIGNATURE_REMINDER_CRON:0 0 8 * * *}
+      janela-dias: ${SIGNATURE_REMINDER_WINDOW_DAYS:7}
+      intervalo-horas: ${SIGNATURE_REMINDER_SPACING_HOURS:72}

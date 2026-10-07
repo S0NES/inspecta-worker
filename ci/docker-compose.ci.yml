@@ -1,0 +1,16 @@
+# Usado pelo job Jenkins "inspecta-worker" (ci/Jenkinsfile), estágio "Build e testes".
+# Só builda + testa; publish (docker push) e deploy (webhook) rodam depois, como
+# estágios separados no Jenkinsfile, direto no agente -- não dependem deste compose.
+name: inspecta-build-inspecta-worker
+
+services:
+  build-inspecta-worker:
+    build:
+      context: ..
+      dockerfile: ci/Dockerfile.ci
+    environment:
+      REGISTRY: ${REGISTRY:-registry.inspecta.viniciusscarabelli.tech}
+      IMAGE_NAME: ${IMAGE_NAME:-registry.inspecta.viniciusscarabelli.tech/inspecta-worker}
+      IMAGE_TAG: ${IMAGE_TAG:-latest}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock

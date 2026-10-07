@@ -1,0 +1,228 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>3.5.0</version>
+    <relativePath/>
+  </parent>
+
+  <groupId>br.com.vistoria</groupId>
+  <artifactId>inspecta-worker</artifactId>
+  <version>0.1.0</version>
+  <name>inspecta-worker</name>
+  <description>Inspecta - Processamento pesado: consumers RabbitMQ, assignment, PDF, imagem, integracoes externas (Pleno, Assinafy, pagamento). Banco via inspecta-core.</description>
+
+  <properties>
+    <java.version>21</java.version>
+    <lombok.version>1.18.46</lombok.version>
+    <jacoco.version>0.8.13</jacoco.version>
+    <!-- Cobertura medida em 2026-08-20: 75.03%, com 13 testes pre-existentes em erro
+         (AssignmentServiceTest, AssinafyReconciliacaoCronTest - uso invalido de matchers
+         do Mockito, nada a ver com PDF). O piso fica em 0.70 para travar regressao agora;
+         suba para 0.85 depois de consertar esses testes. O pacote pdf ja esta em 93.84%. -->
+    <jacoco.line.minimum>0.70</jacoco.line.minimum>
+    <openhtmltopdf.version>1.1.28</openhtmltopdf.version>
+    <jsoup.version>1.18.3</jsoup.version>
+    <freemarker.version>2.3.34</freemarker.version>
+    <zxing.version>3.5.3</zxing.version>
+  </properties>
+
+  <dependencies>
+     <dependency>
+        <groupId>com.inspecta</groupId>
+        <artifactId>inspecta-core</artifactId>
+        <!-- SNAPSHOT: sempre o inspecta-core mais novo do Reposilite (updatePolicy=always
+             no <repository> de snapshots abaixo). Não precisa mais subir versão aqui a
+             cada classe/método novo no inspecta-core — só num marco de quebra de API. -->
+        <version>1.3.0-SNAPSHOT</version>
+    </dependency>
+    
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-actuator</artifactId>
+    </dependency>
+
+    <!-- PDF: renderizacao HTML->PDF em processo, sem browser.
+         Substitui Playwright/Chromium (ver docs/adr/ADR-001-pdf-engine.md):
+         libera inspecta-worker para replicas=2 e derruba o tamanho da imagem. -->
+    <dependency>
+      <groupId>io.github.openhtmltopdf</groupId>
+      <artifactId>openhtmltopdf-pdfbox</artifactId>
+      <version>${openhtmltopdf.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>io.github.openhtmltopdf</groupId>
+      <artifactId>openhtmltopdf-slf4j</artifactId>
+      <version>${openhtmltopdf.version}</version>
+    </dependency>
+    <!-- Normaliza HTML (possivelmente malformado, vindo de template
+         editavel) para XHTML bem-formado, exigencia do OpenHTML2PDF. -->
+    <dependency>
+      <groupId>org.jsoup</groupId>
+      <artifactId>jsoup</artifactId>
+      <version>${jsoup.version}</version>
+    </dependency>
+    <!-- Motor de template dos laudos por imobiliaria. -->
+    <dependency>
+      <groupId>org.freemarker</groupId>
+      <artifactId>freemarker</artifactId>
+      <version>${freemarker.version}</version>
+    </dependency>
+
+    <!-- QR code embutido no laudo (data: URI) apontando pra galeria publica de fotos,
+         em vez de inline-ar cada foto no PDF. Puro Java, sem binario nativo, mesmo
+         criterio do resto do pdf/imagem stack (ADR-001). -->
+    <dependency>
+      <groupId>com.google.zxing</groupId>
+      <artifactId>core</artifactId>
+      <version>${zxing.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>com.google.zxing</groupId>
+      <artifactId>javase</artifactId>
+      <version>${zxing.version}</version>
+    </dependency>
+
+    <!-- Imagem: substitui Sharp (Node) -->
+    <dependency>
+      <groupId>net.coobird</groupId>
+      <artifactId>thumbnailator</artifactId>
+      <version>0.4.20</version>
+    </dependency>
+    <dependency>
+      <groupId>org.sejda.imageio</groupId>
+      <artifactId>webp-imageio</artifactId>
+      <version>0.1.6</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.projectlombok</groupId>
+      <artifactId>lombok</artifactId>
+      <optional>true</optional>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>postgresql</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>rabbitmq</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.awaitility</groupId>
+      <artifactId>awaitility</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <!-- Reposilite: repositório Maven interno rodando como serviço Docker no Dokploy
+       (imagem dzikoysk/reposilite, ver DEPLOY_DOKPLOY.md). É de lá que o inspecta-core
+       é baixado — nem submodule, nem clonar o repo lado a lado. Troque o host pelo
+       domínio real assim que ele existir. -->
+  <repositories>
+    <repository>
+      <id>inspecta-reposilite</id>
+      <url>https://maven.inspecta.viniciusscarabelli.tech/releases</url>
+    </repository>
+    <repository>
+      <id>inspecta-reposilite-snapshots</id>
+      <url>https://maven.inspecta.viniciusscarabelli.tech/snapshots</url>
+      <releases><enabled>false</enabled></releases>
+      <snapshots><enabled>true</enabled><updatePolicy>always</updatePolicy></snapshots>
+    </repository>
+  </repositories>
+
+  <build>
+    <plugins>
+      <!-- Cobertura de teste. `mvn test` gera target/site/jacoco/index.html;
+           `mvn verify` aplica o piso abaixo e falha o build se a cobertura cair.
+           O piso e um catraca: fica no patamar atual para impedir regressao, e sobe
+           deliberadamente em direcao a meta de 0.85. Nao coloque a meta aqui antes de
+           a cobertura alcanca-la, ou o build nasce vermelho e o piso vira ruido. -->
+      <plugin>
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+        <version>${jacoco.version}</version>
+        <executions>
+          <execution>
+            <id>prepare-agent</id>
+            <goals><goal>prepare-agent</goal></goals>
+          </execution>
+          <execution>
+            <id>report</id>
+            <phase>test</phase>
+            <goals><goal>report</goal></goals>
+          </execution>
+          <execution>
+            <id>check</id>
+            <phase>verify</phase>
+            <goals><goal>check</goal></goals>
+            <configuration>
+              <rules>
+                <rule>
+                  <element>BUNDLE</element>
+                  <limits>
+                    <limit>
+                      <counter>LINE</counter>
+                      <value>COVEREDRATIO</value>
+                      <minimum>${jacoco.line.minimum}</minimum>
+                    </limit>
+                  </limits>
+                </rule>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.14.0</version>
+        <configuration>
+          <release>${java.version}</release>
+          <parameters>true</parameters>
+          <annotationProcessorPaths>
+            <path>
+              <groupId>org.projectlombok</groupId>
+              <artifactId>lombok</artifactId>
+              <version>${lombok.version}</version>
+            </path>
+          </annotationProcessorPaths>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+        <configuration>
+          <excludes>
+            <exclude>
+              <groupId>org.projectlombok</groupId>
+              <artifactId>lombok</artifactId>
+            </exclude>
+          </excludes>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>

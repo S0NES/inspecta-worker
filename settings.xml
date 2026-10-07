@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Maven 3.8.1+ embute um mirror "maven-default-http-blocker" que bloqueia
+  qualquer repositorio externo em HTTP puro (nao-HTTPS). O inspecta-reposilite
+  roda em HTTP (ver Dockerfile/pom.xml), entao sem este override o
+  `mvn package` dentro do build stage do Docker falha com
+  "Blocked mirror for repositories: [inspecta-reposilite ...]".
+  Redefine o mesmo id de mirror excluindo inspecta-reposilite E
+  inspecta-reposilite-snapshots do padrao "external:http:*" (via
+  "!inspecta-reposilite,!inspecta-reposilite-snapshots"), para esses repos passarem
+  direto pela URL real deles em vez de serem roteados para o endereco falso do
+  blocker (blocked=false sozinho nao basta: ainda redireciona para
+  0.0.0.0/blocked-by-mirror.invalid e da "Connection refused").
+-->
+<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 https://maven.apache.org/xsd/settings-1.0.0.xsd">
+  <mirrors>
+    <mirror>
+      <id>maven-default-http-blocker</id>
+      <mirrorOf>external:http:*,!inspecta-reposilite,!inspecta-reposilite-snapshots</mirrorOf>
+      <name>Pseudo mirror that overrides the blocking mirror</name>
+      <url>http://0.0.0.0/blocked-by-mirror.invalid</url>
+      <blocked>true</blocked>
+    </mirror>
+  </mirrors>
+</settings>
